@@ -1,5 +1,6 @@
 import React from 'react';
 import { X } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 import type { Database } from '../types/supabase';
 import PayInvoiceButton from './PayInvoiceButton';
 
@@ -40,7 +41,7 @@ export default function InvoiceDetailsModal({ invoice, onClose, onPaymentSuccess
           {invoice.description && (
             <div>
               <h3 className="text-sm font-medium text-gray-500">Description</h3>
-              <p className="mt-1 text-sm text-gray-900 whitespace-pre-wrap">
+              <p className="mt-1 text-sm text-gray-900 whitespace-pre-line">
                 {invoice.description}
               </p>
             </div>
@@ -51,7 +52,7 @@ export default function InvoiceDetailsModal({ invoice, onClose, onPaymentSuccess
             <p className={`mt-1 inline-flex rounded-full px-2 text-xs font-semibold ${
               invoice.status === 'paid'
                 ? 'bg-green-100 text-green-800'
-                : invoice.status === 'sent'
+                : invoice.status === 'sent' || invoice.status === 'opened'
                 ? 'bg-blue-100 text-blue-800'
                 : invoice.status === 'draft'
                 ? 'bg-gray-100 text-gray-800'
@@ -68,7 +69,7 @@ export default function InvoiceDetailsModal({ invoice, onClose, onPaymentSuccess
             </p>
           </div>
 
-          {invoice.status === 'sent' && (
+          {(invoice.status === 'sent' || invoice.status === 'opened') && (
             <div className="pt-4">
               <PayInvoiceButton
                 invoiceId={invoice.id}

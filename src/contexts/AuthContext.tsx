@@ -101,18 +101,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function signIn(email: string, password: string) {
-    console.log('Attempting to sign in user:', email);
-    
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    try {
+      if (!email || !password) {
+        throw new Error('Please enter both email and password');
+      }
 
-    if (error) {
-      console.error('Sign in failed:', error.message);
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (error) {
+        throw new Error(
+          error.message === 'Invalid login credentials'
+            ? 'Invalid email or password'
+            : error.message
+        );
+      }
+    } catch (error) {
       throw error;
-    }    
-    console.log('Sign in successful for user:', email);
+    }
   }
 
   async function signOut() {

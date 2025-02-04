@@ -20,26 +20,29 @@ export default function PayInvoiceButton({ invoiceId, amount, onSuccess }: PayIn
       // Initialize Stripe
       const stripe = await stripePromise;
       if (!stripe) {
-        throw new Error('Payment system is not available');
+        throw new Error('Payment system is temporarily unavailable. Please try again later.');
       }
 
       // Create Stripe session
       const { data, error: sessionError } = await supabase.functions.invoke(
         'create-payment-session',
-        {  
+        {
           body: { invoiceId, amount },
-          // The Supabase client will automatically add the auth header
         }
       );
 
       if (sessionError) {
         console.error('Session creation error:', sessionError);
-        throw new Error(sessionError.message || 'Failed to create payment session');
+        if (sessionError.message?.includes('status transition')) {
+          throw new Error('This invoice has already been paid or is no longer available for payment.');
+        } else {
+          throw new Error('Unable to initialize payment. Please try again later.');
+        }
       }
 
       if (!data?.sessionId) {
         console.error('Invalid session data:', data);
-        throw new Error(data?.error || 'Payment session creation failed');
+        throw new Error('Payment setup failed. Please try again or contact support.');
       }
 
       // Redirect to Stripe Checkout
@@ -49,17 +52,23 @@ export default function PayInvoiceButton({ invoiceId, amount, onSuccess }: PayIn
 
       if (stripeError) {
         console.error('Stripe redirect error:', stripeError);
-        throw stripeError;
+        throw new Error('Unable to redirect to payment page. Please try again.');
       }
 
       onSuccess();
     } catch (err) {
       console.error('Payment error:', err);
-      let errorMessage = 'Payment service is temporarily unavailable';
+      let errorMessage = 'Payment service is temporarily unavailable. Please try again later.';
       
       if (err instanceof Error) {
-        // Clean up error message for display
-        errorMessage = err.message.replace(/^Error: /, '');
+        if (err.message.includes('status transition') || err.message.includes('already been paid')) {
+          errorMessage = err.message;
+        } else if (err.message.includes('Failed to fetch') || err.message.includes('NetworkError')) {
+          errorMessage = 'Unable to connect to payment service. Please check your internet connection and try again.';
+        } else {
+          // Clean up error message for display
+          errorMessage = err.message.replace(/^Error: /, '');
+        }
       }
       
       setError(errorMessage);
