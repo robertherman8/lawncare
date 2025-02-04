@@ -326,12 +326,21 @@ export default function ManagerDashboard() {
   async function fetchPendingAppointments() {
     try {
       const { data, error } = await supabase
-        .from('appointments') 
-        .select('*, customer:profiles!inner(id, email:auth.users(email))')
+        .from('appointments')
+        .select(`
+          *,
+          profiles!customer_id (
+            id,
+            email:auth_users!id (
+              email
+            )
+          )
+        `)
         .eq('status', 'scheduled')
         .order('scheduled_date', { ascending: true });
 
       if (error) throw error;
+      console.log('Fetched appointments:', data);
       setPendingAppointments(data || []);
     } catch (err) {
       console.error('Error fetching pending appointments:', err);
@@ -569,7 +578,7 @@ export default function ManagerDashboard() {
                     <div className="px-4 py-4 sm:px-6">
                       <div className="flex items-center justify-between">
                         <div className="flex-1">
-                          <p className="text-sm font-medium text-indigo-600">
+                          <p className="text-sm font-medium text-indigo-600 truncate">
                             {appointment.customer?.email[0]?.email || 'No email available'}
                           </p>
                           <p className="mt-2 flex items-center text-sm text-gray-500">
@@ -587,13 +596,13 @@ export default function ManagerDashboard() {
                             onClick={() => handleAppointmentAction(appointment.id, 'confirm')}
                             className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
                           >
-                            Confirm
+                            Accept
                           </button>
                           <button
                             onClick={() => handleAppointmentAction(appointment.id, 'reject')}
                             className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
                           >
-                            Reject
+                            Decline
                           </button>
                         </div>
                       </div>

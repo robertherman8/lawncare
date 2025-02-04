@@ -1,6 +1,13 @@
 import { loadStripe } from '@stripe/stripe-js';
 
-export const stripePromise = loadStripe('pk_test_51QoSHiG4X4rQBoW6HrlTZXMUEcnzEUvRo63trYOcXAc0W8NODWRCyFbyOhdco1fY1p7zoqw7JFSbm8tEklH8A68J00PhhXIgY0');
+let stripePromiseInstance: Promise<any> | null = null;
+
+export const stripePromise = () => {
+  if (!stripePromiseInstance) {
+    stripePromiseInstance = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
+  }
+  return stripePromiseInstance;
+};
 
 // Helper function to format amount for display
 export function formatAmount(amount: number): string {

@@ -50,13 +50,17 @@ export default function AppointmentBooking() {
   const [selectedSlot, setSelectedSlot] = useState<TimeSlot | null>(null);
   const [notes, setNotes] = useState('');
   const [calendarDays, setCalendarDays] = useState<CalendarDay[]>([]);
-  const [bookingStatus, setBookingStatus] = useState<'idle' | 'pending' | 'success'>('idle');
+  const [bookingStatus, setBookingStatus] = useState<'idle' | 'pending' | 'success' | 'recurring'>('idle');
   const [monthSchedules, setMonthSchedules] = useState<{[key: string]: boolean}>({});
   const [manualDate, setManualDate] = useState('');
   const [recurringOptions, setRecurringOptions] = useState<RecurringOptions>({
     isRecurring: false,
     weeks: 1
   });
+  const [showRecurringModal, setShowRecurringModal] = useState(false);
+  const [recurringDates, setRecurringDates] = useState<string[]>([]);
+  const [recurringFrequency, setRecurringFrequency] = useState<'weekly' | 'biweekly' | 'monthly'>('weekly');
+  const [maxWeeks, setMaxWeeks] = useState(12); // Default max weeks
 
   useEffect(() => {
     generateCalendarDays();
@@ -198,6 +202,11 @@ export default function AppointmentBooking() {
   async function fetchAvailableSlots(date: string) {
     setLoading(true);
     try {
+      if (!date) {
+        setAvailableSlots([]);
+        return;
+      }
+
       const dayOfWeek = new Date(date).getDay();
 
       // Get schedules for the selected day
@@ -218,7 +227,7 @@ export default function AppointmentBooking() {
       const { data: appointments, error: appointmentsError } = await supabase
         .from('appointments')
         .select('start_time, end_time')
-        .eq('scheduled_date', date)
+        .eq('scheduled_date', date.split('T')[0])
         .eq('status', 'scheduled');
 
       if (appointmentsError) throw appointmentsError;
@@ -226,7 +235,7 @@ export default function AppointmentBooking() {
       // Generate time slots
       const slots: TimeSlot[] = [];
       schedules.forEach((schedule: Schedule) => {
-        const [startHour, startMinute] = schedule.start_time.split(':');
+        const [startHour, startMinute] = schedule.start_time.split(':').map(Number);
         const [endHour, endMinute] = schedule.end_time.split(':');
         const start = new Date(2000, 0, 1, parseInt(startHour), parseInt(startMinute));
         const end = new Date(2000, 0, 1, parseInt(endHour), parseInt(endMinute));
@@ -234,7 +243,7 @@ export default function AppointmentBooking() {
         while (start < end) {
           const slotStart = start.toTimeString().slice(0, 5);
           start.setMinutes(start.getMinutes() + 60); // 1-hour slots
-          const slotEnd = start.toTimeString().slice(0, 5);
+          const slotEnd = new Date(start).toTimeString().slice(0, 5);
 
           const existingAppointments = appointments?.filter(
             app => app.start_time === slotStart
@@ -288,28 +297,24 @@ export default function AppointmentBooking() {
         weeks: recurringOptions.weeks
       });
 
-      let appointments = [{
+      const baseAppointment = {
         customer_id: user?.id,
-        scheduled_date: selectedDate,
         start_time: selectedSlot.start_time,
         end_time: selectedSlot.end_time,
-        status: 'scheduled',
         notes: notes.trim() || null
-      }];
+      };
 
-      // Add recurring appointments if enabled and it's a Friday
-      if (isFriday && recurringOptions.isRecurring && recurringOptions.weeks > 1) {
-        for (let i = 1; i < recurringOptions.weeks; i++) {
-          appointments.push({
-          customer_id: user?.id,
-          scheduled_date: getNextWeekDate(selectedDate, i),
-          start_time: selectedSlot.start_time,
-          end_time: selectedSlot.end_time,
-          status: 'pending',
-          notes: notes.trim() || null
-        });
-        }
-      }
+      const appointments = recurringOptions.isRecurring
+        ? recurringDates.map((date, index) => ({
+            ...baseAppointment,
+            scheduled_date: date,
+            status: index === 0 ? 'scheduled' : 'pending'
+          }))
+        : [{
+            ...baseAppointment,
+            scheduled_date: selectedDate,
+            status: 'scheduled'
+          }];
 
       console.log('Attempting to insert appointments', { count: appointments.length });
 
@@ -317,7 +322,7 @@ export default function AppointmentBooking() {
         .from('appointments')
         .insert(appointments);
 
-      if (error) {
+      if (error) { 
         console.error('Supabase error details:', {
           code: error.code,
           message: error.message,
@@ -325,7 +330,7 @@ export default function AppointmentBooking() {
         });
         throw error;
       }
-
+      
       const message = appointments.length > 1 
         ? `${appointments.length} recurring appointments requested successfully`
         : 'Appointment request submitted successfully';
@@ -334,7 +339,9 @@ export default function AppointmentBooking() {
 
       setSelectedDate('');
       setSelectedSlot(null);
+      setManualDate('');
       setNotes('');
+      setShowRecurringModal(false);
       setRecurringOptions({ isRecurring: false, weeks: 1 });
     } catch (err) {
       console.error('Error booking appointment:', err);
@@ -342,9 +349,119 @@ export default function AppointmentBooking() {
         ? err.message
         : 'Failed to book appointment';
       showToast(errorMessage, 'error');
-    } finally {
+    } finally { 
       setLoading(false);
     }
+  }
+
+  // Recurring Appointment Modal
+  function RecurringModal() {
+    if (!showRecurringModal) return null;
+
+    return (
+      <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center p-4 z-50">
+        <div className="bg-white rounded-lg max-w-lg w-full p-6">
+          <div className="flex justify-between items-center mb-6">
+            <h3 className="text-lg font-medium text-gray-900">Schedule Recurring Appointments</h3>
+            <button
+              onClick={() => setShowRecurringModal(false)}
+              className="text-gray-400 hover:text-gray-500"
+            >
+              <span className="sr-only">Close</span>
+              <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          <div className="space-y-6">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Frequency</label>
+              <select
+                value={recurringFrequency}
+                onChange={(e) => {
+                  setRecurringFrequency(e.target.value as 'weekly' | 'biweekly' | 'monthly');
+                  setRecurringDates(calculateRecurringDates(
+                    selectedDate,
+                    e.target.value as 'weekly' | 'biweekly' | 'monthly',
+                    recurringOptions.weeks
+                  ));
+                }}
+                className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+              >
+                <option value="weekly">Weekly</option>
+                <option value="biweekly">Bi-weekly</option>
+                <option value="monthly">Monthly</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Number of Appointments
+              </label>
+              <select
+                value={recurringOptions.weeks}
+                onChange={(e) => {
+                  const weeks = parseInt(e.target.value);
+                  setRecurringOptions(prev => ({ ...prev, weeks }));
+                  setRecurringDates(calculateRecurringDates(
+                    selectedDate,
+                    recurringFrequency,
+                    weeks
+                  ));
+                }}
+                className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+              >
+                {[...Array(maxWeeks)].map((_, i) => (
+                  <option key={i + 1} value={i + 1}>
+                    {i + 1} {i === 0 ? 'appointment' : 'appointments'}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <h4 className="text-sm font-medium text-gray-700 mb-2">Scheduled Dates</h4>
+              <div className="bg-gray-50 rounded-lg p-4 space-y-2">
+                {recurringDates.map((date, index) => (
+                  <div key={date} className="flex items-center text-sm">
+                    <span className="w-6 text-gray-500">{index + 1}.</span>
+                    <span className="text-gray-900">
+                      {new Date(date).toLocaleDateString('en-US', {
+                        weekday: 'long',
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric'
+                      })}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-3 pt-4">
+              <button
+                type="button"
+                onClick={() => setShowRecurringModal(false)}
+                className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setRecurringOptions(prev => ({ ...prev, isRecurring: true }));
+                  handleBooking();
+                }}
+                className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700"
+              >
+                Confirm Recurring Appointments
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   // Calculate minimum date (today)
@@ -466,13 +583,13 @@ export default function AppointmentBooking() {
         {selectedDate && (
           <div className="mt-6">
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Available Time Slots
+              Select a Time Slot
             </label>
             {loading ? (
               <div className="text-center py-4">Loading available slots...</div>
             ) : availableSlots.length === 0 ? (
-              <div className="text-center py-4 text-gray-500">
-                No available slots for this date
+              <div className="text-center py-4 px-4 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-800">
+                <p>No available slots for this date. Please select another date.</p>
               </div>
             ) : (
               <div className="grid grid-cols-4 gap-2">
@@ -563,17 +680,46 @@ export default function AppointmentBooking() {
           </div>
         )}
 
-        <div className="flex justify-end pt-6">
+        <div className="flex justify-end pt-6 space-x-4">
           <button
             type="button"
-            onClick={handleBooking}
-            disabled={loading || !selectedDate || !selectedSlot}
-            className="inline-flex items-center px-6 py-3 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+            onClick={handleRecurringClick}
+            className={`
+              inline-flex items-center px-6 py-3 border border-indigo-200 rounded-lg text-sm font-medium
+              ${selectedSlot
+                ? 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100 cursor-pointer'
+                : 'bg-gray-100 text-gray-400 cursor-not-allowed'}
+              focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500
+              transition-colors duration-200
+            `}
+            disabled={!selectedSlot || loading}
           >
             <Calendar className="w-5 h-5 mr-2" />
-            {loading ? 'Booking...' : recurringOptions.isRecurring 
-              ? `Book ${recurringOptions.weeks} Appointments` 
-              : 'Request Appointment'
+            Schedule Recurring
+          </button>
+
+          <button
+            type="button"
+            onClick={() => selectedSlot && !recurringOptions.isRecurring ? handleBooking() : undefined}
+            className={`
+              inline-flex items-center px-6 py-3 border border-transparent rounded-lg shadow-sm text-sm font-medium
+              ${loading
+                ? 'bg-gray-400 cursor-not-allowed'
+                : selectedSlot
+                  ? 'bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer'
+                  : 'bg-gray-100 text-gray-400 cursor-not-allowed'}
+              focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500
+              transition-colors duration-200
+            `}
+            disabled={loading}
+          >
+            <Calendar className="w-5 h-5 mr-2" />
+            {loading ? 'Booking...'
+              : !selectedDate
+                ? 'Select a Date'
+                : !selectedSlot
+                  ? 'Select a Time Slot'
+                  : 'Request Appointment'
             }
           </button>
         </div>
@@ -586,6 +732,9 @@ export default function AppointmentBooking() {
           </div>
         )}
       </div>
+      
+      {/* Recurring Modal */}
+      <RecurringModal />
     </div>
   );
 }

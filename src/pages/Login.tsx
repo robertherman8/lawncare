@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { LogIn } from 'lucide-react';
@@ -10,22 +10,36 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const { signIn } = useAuth();
+  const { signIn, user, loading: authLoading } = useAuth();
 
   const from = location.state?.from?.pathname || '/dashboard';
+
+  // Redirect if already logged in
+  useEffect(() => {
+    if (!authLoading && user) {
+      console.log('User authenticated, redirecting to:', from);
+      navigate(from, { replace: true });
+    }
+  }, [user, authLoading, navigate, from]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     
+    if (!email || !password) {
+      setError('Please enter both email and password');
+      return;
+    }
+
     try {
       setError('');
       setLoading(true);
       await signIn(email, password);
-      navigate(from, { replace: true });
+      console.log('Sign in successful');
     } catch (err) {
       const errorMessage = err instanceof Error 
         ? err.message 
-        : 'An unexpected error occurred. Please try again.';
+        : 'An unexpected error occurred';
+      console.error('Sign in error:', err);
       setError(errorMessage);
     } finally {
       setLoading(false);
@@ -33,7 +47,7 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-gray-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8 relative">
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
         <div className="flex justify-center">
           <LogIn className="w-12 h-12 text-indigo-600" />
@@ -63,6 +77,7 @@ export default function Login() {
                   type="email"
                   autoComplete="email"
                   required
+                  disabled={loading}
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
@@ -81,6 +96,7 @@ export default function Login() {
                   type="password"
                   autoComplete="current-password"
                   required
+                  disabled={loading}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"

@@ -18,7 +18,7 @@ export default function PayInvoiceButton({ invoiceId, amount, onSuccess }: PayIn
       setError('');
 
       // Initialize Stripe
-      const stripe = await stripePromise;
+      const stripe = await stripePromise();
       if (!stripe) {
         throw new Error('Payment system is temporarily unavailable. Please try again later.');
       }
@@ -46,13 +46,18 @@ export default function PayInvoiceButton({ invoiceId, amount, onSuccess }: PayIn
       }
 
       // Redirect to Stripe Checkout
-      const { error: stripeError } = await stripe.redirectToCheckout({
-        sessionId: data.sessionId
-      });
+      try {
+        const { error: stripeError } = await stripe.redirectToCheckout({
+          sessionId: data.sessionId
+        });
 
-      if (stripeError) {
-        console.error('Stripe redirect error:', stripeError);
-        throw new Error('Unable to redirect to payment page. Please try again.');
+        if (stripeError) {
+          console.error('Stripe redirect error:', stripeError);
+          throw new Error('Unable to redirect to payment page. Please try again.');
+        }
+      } catch (redirectError) {
+        console.error('Stripe redirect error:', redirectError);
+        throw new Error('Payment system is temporarily unavailable. Please try again later.');
       }
 
       onSuccess();

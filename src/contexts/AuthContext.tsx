@@ -21,70 +21,116 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Cleanup function type
+  type Cleanup = () => void;
+
   useEffect(() => {
-    // Check active sessions and get user profile
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        getProfile(session.user.id);
+    let mounted = true;
+
+    async function initializeAuth() {
+      try {
+        setLoading(true);
+        
+        // Get current session
+        const { data: { session } } = await supabase.auth.getSession();
+
+        // Log session state
+        console.log('Auth initialized:', { 
+          hasSession: !!session,
+          userId: session?.user?.id 
+        });
+
+        // Set user state
+        if (mounted) {
+          setUser(session?.user ?? null);
+        }
+        
+        // Get profile if user exists
+        if (session?.user) {
+          try {
+            const profile = await getProfile(session.user.id);
+            if (mounted && profile) {
+              setProfile(profile);
+            }
+          } catch (profileError) {
+            console.error('Error fetching profile:', profileError);
+          }
+        }
+      } catch (err) {
+        console.error('Error initializing auth:', err);
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
       }
-      setLoading(false);
-    });
+    }
+
+    initializeAuth();
 
     // Listen for auth changes
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      console.log('Auth state changed:', { 
+        event: _event,
+        userId: session?.user?.id 
+      });
+
+      if (mounted) {
+        setUser(session?.user ?? null);
+      }
+      
       if (session?.user) {
-        getProfile(session.user.id);
+        try {
+          const profile = await getProfile(session.user.id);
+          if (mounted && profile) {
+            setProfile(profile);
+          }
+        } catch (err) {
+          console.error('Error fetching profile on auth change:', err);
+        }
       } else {
-        setProfile(null);
+        if (mounted) {
+          setProfile(null);
+        }
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   async function getProfile(userId: string) {
-    console.log('Fetching profile for user:', userId);
+    try {
+      if (!userId) {
+        return null;
+      }
 
-    // Get the current user's metadata
-    const { data: { user: currentUser } } = await supabase.auth.getUser();
-    console.log('Current user metadata:', currentUser?.user_metadata);
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
 
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single();
+      if (error) {
+        throw error;
+      }
 
-    if (error) {
-      console.error('Error fetching profile:', error);
-      console.error('Failed to fetch profile for user:', userId);
-      return;
+      if (!data) {
+        return null;
+      }
+
+      setProfile(data);
+      return data;
+    } catch (err) {
+      console.error('Error in getProfile:', err);
+      return null;
     }
-
-    console.log('Profile role accessed:', {
-      userId,
-      role: data.role,
-      metadata_role: currentUser?.user_metadata?.role,
-      timestamp: new Date().toISOString(),
-    });
-
-    if (data.role !== currentUser?.user_metadata?.role) {
-      console.warn('Role mismatch detected:', {
-        profile_role: data.role,
-        metadata_role: currentUser?.user_metadata?.role
-      });
-    }
-
-    setProfile(data);
   }
 
   async function signUp(email: string, password: string, role: 'customer' | 'manager') {
-    console.log('Attempting to create account with role:', role);
-    
     // Validate role before signup
     if (role !== 'customer' && role !== 'manager') {
       throw new Error('Invalid role specified');
@@ -97,7 +143,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     if (signUpError) throw signUpError;
-    console.log('Account created successfully with role:', role);
   }
 
   async function signIn(email: string, password: string) {
@@ -106,7 +151,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         throw new Error('Please enter both email and password');
       }
 
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
@@ -118,8 +163,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             : error.message
         );
       }
+
+      if (!data.user) {
+        throw new Error('Authentication failed. Please try again.');
+      }
+
+      // Get profile immediately after successful sign in
+      try {
+        const profile = await getProfile(data.user.id);
+        if (!profile) {
+          throw new Error('Unable to load user profile');
+        }
+      } catch (profileError) {
+        console.error('Error fetching profile after login:', profileError);
+        throw new Error('Unable to load user profile. Please try again.');
+      }
+
     } catch (error) {
-      throw error;
+      const message = error instanceof Error ? error.message : 'Failed to sign in';
+      throw new Error(message);
     }
   }
 
